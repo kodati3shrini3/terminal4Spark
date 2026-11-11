@@ -16,6 +16,7 @@ It is part of the same family as [sparkToolset](https://github.com/kodati3shrini
 | Readable file lists | Each theme has its own 16-colour palette, so blue directory names in `ls --color` stay visible on a dark background. |
 | Defaults for new tabs | The gear button sets the starting settings of every new tab. They are saved in `~/.config/sparkTerminal/settings.conf`. Open tabs keep their own settings. |
 | Copy the result of each command | One switch for the whole program, in the gear dialog (see below). |
+| Half-screen window | One switch for the whole program, in the gear dialog: "Open the window on half of the screen", with "Left half" or "Right half". The window takes that half of the monitor where your mouse pointer is, when the program starts and at once when you press Apply. It is not offered in the settings of a single tab. |
 
 ## Copy the result of each command
 
@@ -63,6 +64,7 @@ NVIDIA DGX Spark (GB10, ARM64), DGX OS (Ubuntu 24.04), GNOME, VTE 0.76. The grap
 |---|---|
 | Very long output | If one command prints more than 100,000 lines, the copied text may begin with blank lines where the oldest lines scrolled out of the history. |
 | Shell | Each tab runs `bash`. Other shells are not supported. |
+| Half-screen window | Tested only on X11 with one monitor. On Wayland a program usually cannot place its own window, so the setting may have no effect there. With several monitors the half is taken on the one under the mouse pointer (not tested). |
 | A rare crash | Once during testing the program ended with "Segmentation fault". It could not be reproduced in three runs. If it happens to you, start the program with `python3 -X faulthandler ./sparkTerminal.py` and report the output in an issue. |
 
 ## License

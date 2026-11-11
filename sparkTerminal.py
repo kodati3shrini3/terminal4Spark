@@ -79,6 +79,8 @@ BUILT_IN_DEFAULTS = {  # defaults agreed with the user; used when no settings fi
     "prompt_colour": "auto",  # automatic: bold colour chosen from the theme and the text colour
     "font_size": "medium",  # system monospace size
     "copy_result": "no",  # do not copy command results to the clipboard unless switched on
+    "half_screen": "no",  # open the window at its normal size unless switched on
+    "half_side": "left",  # which half of the screen is used when the half-screen switch is on
 }  # end of the table above
 
 
@@ -162,6 +164,8 @@ def load_defaults():  # program defaults from the settings file, checked against
             "prompt_colour": [v for v, _ in PROMPT_COLOURS],  # automatic or one of six colours
             "font_size": FONT_SIZES,  # medium, large
             "copy_result": ["yes", "no"],  # on or off
+            "half_screen": ["yes", "no"],  # on or off
+            "half_side": ["left", "right"],  # left or right half of the screen
         }  # end of the table above
         for key, options in allowed.items():  # check every key
             value = parser.get("defaults", key, fallback=values[key])  # value from the file, or the default
@@ -176,6 +180,17 @@ def save_defaults(values):  # write the program defaults to sparkTerminal's own 
     parser["defaults"] = values  # one section with all settings
     with open(CONFIG_FILE, "w", encoding="utf-8") as handle:  # overwrite the file
         parser.write(handle)  # save it
+
+
+def half_screen_rectangle(side):  # (x, y, width, height) of the left or right half of the usable area of the monitor under the mouse pointer
+    display = Gdk.Display.get_default()  # connection to the screen
+    pointer = display.get_default_seat().get_pointer()  # the mouse of the user
+    _screen, pointer_x, pointer_y = pointer.get_position()  # where the pointer is, in screen coordinates
+    monitor = display.get_monitor_at_point(pointer_x, pointer_y)  # the monitor under the pointer
+    area = monitor.get_workarea()  # usable area of that monitor (without the top bar and the dock)
+    half = area.width // 2  # half of the usable width
+    left = area.x if side == "left" else area.x + area.width - half  # left edge of the chosen half
+    return left, area.y, half, area.height  # position and size of the half
 
 
 def apply_look(terminal, settings):  # colours and font of one terminal widget (tab or preview)
@@ -276,6 +291,25 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             copy_check.set_active(settings["copy_result"] == "yes")  # current state
             grid.attach(copy_check, 1, row, 1, 1)  # under the font size list
             row += 1  # next row
+        half_check = None  # the half-screen choice exists only in the program defaults dialog (gear button), not for single tabs
+        left_radio = None  # "Left half" choice (defaults dialog only)
+        right_radio = None  # "Right half" choice (defaults dialog only)
+        if name is None:  # only the gear dialog has no tab name field
+            half_check = Gtk.CheckButton(label="Open the window on half of the screen")  # half-screen switch for the whole application
+            half_check.set_active(settings["half_screen"] == "yes")  # current state
+            grid.attach(half_check, 1, row, 1, 1)  # under the copy switch
+            row += 1  # next row
+            side_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)  # holder for the two side choices
+            left_radio = Gtk.RadioButton.new_with_label_from_widget(None, "Left half")  # first choice starts the radio group
+            right_radio = Gtk.RadioButton.new_with_label_from_widget(left_radio, "Right half")  # second choice joins the group
+            if settings["half_side"] == "right":  # current side
+                right_radio.set_active(True)  # right half selected
+            side_box.pack_start(left_radio, False, False, 0)  # left choice first
+            side_box.pack_start(right_radio, False, False, 0)  # then the right choice
+            side_box.set_sensitive(half_check.get_active())  # the side can only be chosen while the switch is on
+            half_check.connect("toggled", lambda button: side_box.set_sensitive(button.get_active()))  # enable or disable the side choice
+            grid.attach(side_box, 1, row, 1, 1)  # under the half-screen switch
+            row += 1  # next row
 
         grid.attach(Gtk.Label(label="Preview (before Apply)", xalign=0), 0, row, 2, 1)  # preview heading
         row += 1  # next row
@@ -292,6 +326,8 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 "text_colour": colour_box.get_active_id(),  # chosen colour
                 "prompt_colour": prompt_colour_box.get_active_id(),  # chosen prompt colour
                 "font_size": size_box.get_active_id(),  # chosen size
+                "half_screen": ("yes" if half_check.get_active() else "no") if half_check is not None else settings["half_screen"],  # half-screen switch state (a tab dialog keeps the value unchanged)
+                "half_side": ("right" if right_radio.get_active() else "left") if right_radio is not None else settings["half_side"],  # chosen half (a tab dialog keeps the value unchanged)
                 "copy_result": ("yes" if copy_check.get_active() else "no") if copy_check is not None else settings["copy_result"],  # copy switch state (a tab dialog keeps the value unchanged)
             }  # end of the table above
 
@@ -308,6 +344,9 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             colour_box.set_active_id(values["text_colour"])  # colour
             prompt_colour_box.set_active_id(values["prompt_colour"])  # prompt colour
             size_box.set_active_id(values["font_size"])  # size
+            if half_check is not None:  # only the defaults dialog has the half-screen choice
+                half_check.set_active(values["half_screen"] == "yes")  # half-screen switch
+                (right_radio if values["half_side"] == "right" else left_radio).set_active(True)  # chosen half
             if copy_check is not None:  # only the defaults dialog has the switch
                 copy_check.set_active(values["copy_result"] == "yes")  # copy switch
 
@@ -534,12 +573,43 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         self.tab_counter += 1  # count the new tab
         self.add_tab(name or suggested, settings)  # empty name falls back to the suggestion
 
+    def place_on_half(self):  # put the window on the chosen half of the screen; does nothing when the switch is off
+        if self.defaults.get("half_screen") != "yes":  # switch is off
+            return  # leave the window as it is
+        try:  # pointer or monitor information may be missing on unusual setups
+            left, top, width, height = half_screen_rectangle(self.defaults["half_side"])  # the chosen half of the monitor under the pointer
+        except Exception:  # keep the normal window
+            return  # nothing to do
+        if self.is_maximized():  # a maximized window ignores size and position
+            self.unmaximize()  # make it a normal window first
+        self.resize(width, height)  # width of half the screen, full usable height
+        self.move(left, top)  # left or right edge
+        from gi.repository import GLib  # timer, imported here so the top of the program stays unchanged
+        GLib.timeout_add(200, self.fit_frame, left, top, width, height)  # later, when the title bar exists, make the whole frame fit
+
+    def fit_frame(self, left, top, width, height):  # shrink the window by the size of its title bar and borders so the frame fits the half exactly
+        try:  # never let a placement detail stop the program
+            gdk_window = self.get_window()  # the real window on screen (None before it is shown)
+            if gdk_window is not None:  # only when it exists
+                frame = gdk_window.get_frame_extents()  # size of the window including title bar and borders
+                extra_width = max(0, frame.width - width)  # how much wider than the half the frame is
+                extra_height = max(0, frame.height - height)  # how much taller than the usable height the frame is
+                if extra_width or extra_height:  # the frame is too big
+                    self.resize(width - extra_width, height - extra_height)  # make the inside smaller by that amount
+                    self.move(left, top)  # keep the top left corner in place
+        except Exception:  # ignore any problem
+            pass  # the window simply keeps its size
+        return False  # run only once
+
     def on_defaults_clicked(self, _button=None):  # gear button: defaults for new tabs
         result = self.settings_dialog("Default settings for new tabs", self.defaults, BUILT_IN_DEFAULTS, "Apply")  # Reset = agreed built-in defaults
         if result is None:  # Cancel
             return  # nothing changes
+        old_half = (self.defaults.get("half_screen"), self.defaults.get("half_side"))  # half-screen choice before the change
         self.defaults = result[1]  # new defaults (open tabs keep their own settings)
         save_defaults(self.defaults)  # save to ~/.config/sparkTerminal/settings.conf
+        if (self.defaults["half_screen"], self.defaults["half_side"]) != old_half:  # the half-screen choice was changed
+            self.place_on_half()  # move and resize the open window at once
 
     def current_terminal(self):  # the terminal widget of the tab in front, or None
         scroller = self.current_scroller()  # the tab in front
@@ -638,6 +708,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
 
 def main():  # program entry point
     window = SparkTerminalWindow()  # build the window
+    window.place_on_half()  # on the left or right half of the screen when that is switched on
     window.show_all()  # show it on screen
     try:  # make sure the private folder is removed however the program ends
         Gtk.main()  # run until the window is closed
