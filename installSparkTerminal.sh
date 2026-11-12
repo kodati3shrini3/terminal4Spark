@@ -85,6 +85,7 @@ write_desktop_entry() {  # write one launcher file (menu or Desktop)
     say "  writing $file"  # tell the user
     [ "$DRY_RUN" -eq 1 ] && return 0  # a dry run stops here
     mkdir -p "$(dirname "$file")"  # make sure the folder exists
+    # StartupWMClass is the window class GNOME sees (the program file name), so all windows group under this one icon
     cat > "$file" <<EOF
 [Desktop Entry]
 Type=Application
@@ -94,6 +95,7 @@ Exec="$target/sparkTerminal.py"
 Icon=$target/sparkTerminalIcon.svg
 Terminal=false
 Categories=System;TerminalEmulator;
+StartupWMClass=sparkTerminal.py
 EOF
     chmod +x "$file"  # launchers must be executable to start from the Desktop
 }  # end of the function
