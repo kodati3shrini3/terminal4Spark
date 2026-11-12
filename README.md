@@ -17,6 +17,7 @@ It is part of the same family as [sparkToolset](https://github.com/kodati3shrini
 | Defaults for new tabs | The gear button sets the starting settings of every new tab. They are saved in `~/.config/sparkTerminal/settings.conf`. Open tabs keep their own settings. |
 | Copy the result of each command | One switch for the whole program, in the gear dialog (see below). |
 | Half-screen window | One switch for the whole program, in the gear dialog: "Open the window on half of the screen", with "Left half" or "Right half". The window takes that half of the monitor where your mouse pointer is, when the program starts and at once when you press Apply. It is not offered in the settings of a single tab. |
+| Several windows | Each click on the icon opens a new window. All windows share one icon in the dock, and you close them yourself. Right-click the icon and choose "New Window" for another one. If you installed an earlier version, run the installer again to get this. |
 
 ## Copy the result of each command
 
