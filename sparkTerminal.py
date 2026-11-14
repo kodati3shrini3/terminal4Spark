@@ -23,7 +23,7 @@ gi.require_version("Gtk", "3.0")  # use GTK 3 (same toolkit as the ports widget)
 gi.require_version("Pango", "1.0")  # font descriptions (family and size)
 gi.require_version("Vte", "2.91")  # use VTE 2.91 (the terminal engine inside GNOME Terminal, 0.76 here)
 
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango, Vte  # Gio reads GNOME settings (read only); the rest as named above
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango, Vte  # Gio reads GNOME settings (it writes only the default terminal, when you press the button); the rest as named above
 
 APP_TITLE = "sparkTerminal"  # window title shown in the title bar and the task bar
 SHELL = "/bin/bash"  # the shell started in each tab (bash, as agreed)
@@ -199,6 +199,81 @@ def save_defaults(values):  # write the program defaults to sparkTerminal's own 
         parser.write(handle)  # save it
 
 
+TERMINAL_SCHEMA = "org.gnome.desktop.default-applications.terminal"  # GNOME setting (per user) that names the default terminal command
+TERMINAL_KEY = "exec"  # the key inside that setting
+PREVIOUS_FILE = os.path.join(GLib.get_user_config_dir(), "sparkTerminal", "previousDefaultTerminal.conf")  # sparkTerminal's own note of the value that was there before
+
+
+def terminal_setting():  # the GNOME setting object, or None when this desktop does not have it
+    source = Gio.SettingsSchemaSource.get_default()  # list of the installed settings schemas
+    if source is None or source.lookup(TERMINAL_SCHEMA, True) is None:  # look first: opening a missing schema would crash the program
+        return None  # not available here
+    return Gio.Settings.new(TERMINAL_SCHEMA)  # the setting itself
+
+
+def own_command():  # full path of this program: the value that makes it the default terminal
+    return os.path.realpath(__file__)  # absolute path, symbolic links resolved
+
+
+def command_problem(command):  # empty text when the command can be used as default terminal, otherwise the reason
+    if any(ch.isspace() or ch in "'\"\\$" for ch in command):  # spaces and quote characters would break the command line GNOME builds
+        return "the program path contains spaces or special characters"  # reason shown to the user
+    if not os.access(command, os.X_OK):  # GNOME starts the file directly, so it must be executable
+        return "the program file is not executable"  # reason shown to the user
+    return ""  # usable
+
+
+def previous_terminal():  # the value saved before "Set sparkTerminal as default", or None when nothing is saved
+    parser = configparser.ConfigParser(interpolation=None)  # reader for sparkTerminal's own note (no % handling)
+    parser.read(PREVIOUS_FILE)  # a missing file is simply ignored
+    return parser.get("previous", "exec", fallback=None)  # the saved command, or None
+
+
+def make_default_terminal():  # makes sparkTerminal the user's default terminal; returns a short message for the user
+    setting = terminal_setting()  # the GNOME setting
+    if setting is None:  # no such setting on this desktop
+        return "This desktop has no default terminal setting."  # nothing is changed
+    ours = own_command()  # this program
+    problem = command_problem(ours)  # can it be used?
+    if problem:  # not usable
+        return "Not changed: " + problem + "."  # nothing is changed
+    current = setting.get_string(TERMINAL_KEY)  # the value that is set now
+    if current == ours:  # nothing to do
+        return "sparkTerminal is already the default terminal."  # nothing is changed
+    os.makedirs(os.path.dirname(PREVIOUS_FILE), exist_ok=True)  # create ~/.config/sparkTerminal if needed
+    parser = configparser.ConfigParser(interpolation=None)  # writer for sparkTerminal's own note
+    parser["previous"] = {"exec": current}  # remember the value that is replaced
+    with open(PREVIOUS_FILE, "w", encoding="utf-8") as handle:  # save the note BEFORE changing anything
+        parser.write(handle)  # write it
+    if previous_terminal() != current:  # the note must be readable, otherwise Restore could not work
+        return "Not changed: the previous value could not be saved."  # nothing is changed
+    setting.set_string(TERMINAL_KEY, ours)  # the one and only change to the desktop: our command becomes the default
+    Gio.Settings.sync()  # write it out at once
+    if setting.get_string(TERMINAL_KEY) != ours:  # check that GNOME took it
+        return "Not changed: the desktop did not accept the setting."  # the saved note stays, it is harmless
+    return "Done. sparkTerminal is now the default terminal."  # success
+
+
+def restore_default_terminal():  # puts the saved previous value back; returns a short message for the user
+    setting = terminal_setting()  # the GNOME setting
+    if setting is None:  # no such setting on this desktop
+        return "This desktop has no default terminal setting."  # nothing is changed
+    previous = previous_terminal()  # the value saved by "Set sparkTerminal as default"
+    if previous is None:  # nothing saved
+        return "Nothing to restore: no previous value is saved."  # nothing is changed
+    if setting.get_string(TERMINAL_KEY) != own_command():  # something else changed the default since then
+        return "Not changed: the default is not sparkTerminal any more."  # do not overwrite someone else's choice
+    setting.set_string(TERMINAL_KEY, previous)  # put the old value back
+    Gio.Settings.sync()  # write it out at once
+    if setting.get_string(TERMINAL_KEY) != previous:  # check that GNOME took it
+        return "Not restored: the desktop did not accept the setting."  # the saved note stays
+    try:  # the note is no longer needed
+        os.remove(PREVIOUS_FILE)  # delete sparkTerminal's own note (nothing else)
+    except OSError:  # ignore a problem here
+        pass  # harmless
+    return "Done. The previous default terminal is back."  # success
+
+
 def half_screen_rectangle(side):  # (x, y, width, height) of the left or right half of the usable area of the monitor under the mouse pointer
     display = Gdk.Display.get_default()  # connection to the screen
     pointer = display.get_default_seat().get_pointer()  # the mouse of the user
@@ -360,6 +435,77 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             half_check.connect("toggled", lambda button: side_box.set_sensitive(button.get_active()))  # enable or disable the side choice
             grid.attach(side_box, 1, row, 1, 1)  # under the half-screen switch
             row += 1  # next row
+
+        if name is None:  # only the gear dialog has the default-terminal buttons
+            default_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # holder: status text, buttons, note
+            default_status = Gtk.Label(xalign=0)  # says what the default terminal is now
+            default_status.set_line_wrap(True)  # long text wraps
+            default_status.set_max_width_chars(50)  # keeps the box narrow
+            button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)  # the two buttons side by side
+            make_button = Gtk.Button(label="Set sparkTerminal as default")  # sets sparkTerminal as default (asks first)
+            restore_button = Gtk.Button(label="Restore OS default")  # puts the saved value back
+            button_row.pack_start(make_button, False, False, 0)  # first button
+            button_row.pack_start(restore_button, False, False, 0)  # second button
+            default_note = Gtk.Label(label="Takes effect at once; not part of Apply or Cancel. GNOME Terminal is not changed.", xalign=0)  # note
+            default_note.set_line_wrap(True)  # long text wraps
+            default_note.set_max_width_chars(50)  # keeps the box narrow
+            default_note.get_style_context().add_class("dim-label")  # smaller, greyed text
+            default_box.pack_start(default_status, False, False, 0)  # status first
+            default_box.pack_start(button_row, False, False, 0)  # then the buttons
+            default_warning = Gtk.Label(xalign=0)  # warning line, not greyed out so that it stands out
+            default_warning.set_markup("<span foreground='#e01b24' weight='bold' size='large'>\u26a0</span> Some programs that ask for a terminal to run a command will open an empty window (not supported yet).")  # red bold warning symbol
+            default_warning.set_line_wrap(True)  # long text wraps
+            default_warning.set_max_width_chars(50)  # keeps the box narrow
+            default_box.pack_start(default_note, False, False, 0)  # then the note
+            default_box.pack_start(default_warning, False, False, 0)  # then the warning line
+            grid.attach(Gtk.Label(label="Default terminal", xalign=0, yalign=0), 0, row, 1, 1)  # label
+            grid.attach(default_box, 1, row, 1, 1)  # the holder
+            row += 1  # next row
+
+            def refresh_default_status(message=""):  # show the current state and enable only the buttons that make sense
+                setting = terminal_setting()  # the GNOME setting, or None
+                can_make = False  # "Set sparkTerminal as default" enabled?
+                can_restore = False  # "Restore OS default" enabled?
+                if setting is None:  # not available on this desktop
+                    text = "Not available on this desktop."  # status text
+                else:  # available
+                    current = setting.get_string(TERMINAL_KEY)  # the command set now
+                    ours = current == own_command()  # is it this program?
+                    problem = command_problem(own_command())  # can this program be used as default?
+                    can_restore = ours and previous_terminal() is not None  # only when we set it and know the old value
+                    can_make = (not ours) and not problem  # only when it is not set yet and usable
+                    if ours:  # already the default
+                        text = "sparkTerminal is the default terminal."  # status text
+                    elif problem:  # cannot be used
+                        text = "Cannot be set: " + problem + "."  # status text
+                    else:  # something else is the default
+                        text = "Current default: " + current  # status text
+                if message:  # result of the last click
+                    text = message + "\n" + text  # shown above the status
+                default_status.set_text(text)  # update the label
+                make_button.set_sensitive(can_make)  # update the buttons
+                restore_button.set_sensitive(can_restore)  # update the buttons
+
+            def on_make_default(_button):  # click on "Set sparkTerminal as default"
+                ask = Gtk.MessageDialog(transient_for=dialog, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                        buttons=Gtk.ButtonsType.OK_CANCEL, text="Set sparkTerminal as your default terminal?")  # confirmation first, OK or Cancel
+                ask.format_secondary_markup("This changes one setting of your user account: which terminal programs open by default. "
+                                          "GNOME Terminal is not changed and still opens from its own icon. "
+                                          "You can undo this at any time with \"Restore OS default\".\n\n"
+                                          "<span foreground='#e01b24' weight='bold' size='large'>\u26a0</span> <b>Warning:</b> some programs ask the terminal to run a command for you. "
+                                          "For example, a program that wants to start htop in a terminal will open an empty "
+                                          "sparkTerminal window, and htop will not start.")  # plain explanation with a real example
+                answer = ask.run()  # wait for OK or Cancel
+                ask.destroy()  # close the question
+                if answer == Gtk.ResponseType.OK:  # the user agreed
+                    refresh_default_status(make_default_terminal())  # do it and show the result
+
+            def on_restore_default(_button):  # click on "Restore OS default"
+                refresh_default_status(restore_default_terminal())  # undo and show the result
+
+            make_button.connect("clicked", on_make_default)  # connect the buttons
+            restore_button.connect("clicked", on_restore_default)  # connect the buttons
+            refresh_default_status()  # first display
 
         grid.attach(Gtk.Label(label="Preview (before Apply)", xalign=0), 0, row, 2, 1)  # preview heading
         row += 1  # next row

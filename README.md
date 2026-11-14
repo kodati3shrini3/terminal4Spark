@@ -17,6 +17,7 @@ It is part of the same family as [sparkToolset](https://github.com/kodati3shrini
 | Defaults for new tabs | The gear button sets the starting settings of every new tab. They are saved in `~/.config/sparkTerminal/settings.conf`. Open tabs keep their own settings. |
 | Copy the result of each command | One switch for the whole program, in the gear dialog (see below). |
 | Half-screen window | One switch for the whole program, in the gear dialog: "Open the window on half of the screen", with "Left half" or "Right half". The window takes that half of the monitor where your mouse pointer is, when the program starts and at once when you press Apply. It is not offered in the settings of a single tab. |
+| Default terminal | In the gear dialog, "Set sparkTerminal as default" (it asks first) sets sparkTerminal as the terminal that programs and the Ctrl+Alt+T shortcut open, for your user only. "Restore OS default" puts the old value back (on a normal setup that is the system's own default terminal). See "Make it the default terminal" below. |
 | Several windows | Each click on the icon opens a new window. All windows share one icon in the dock, and you close them yourself. Right-click the icon and choose "New Window" for another one. If you installed an earlier version, run the installer again to get this. |
 
 ## Copy the result of each command
@@ -36,6 +37,18 @@ Example: run `ls -l`, switch to a text editor and paste. You get the file list w
 | Start and exit | The clipboard is not cleared when the program starts, closes or when you untick the switch. It changes only when the next command produces output. |
 
 Good to know: the result of a command can contain secrets such as tokens or passwords. It stays on the clipboard after you close the program, and some desktops keep a clipboard history. Switch the feature off when you work with sensitive output.
+
+## Make it the default terminal
+
+This is optional and never happens by itself. Open the gear dialog and press "Set sparkTerminal as default". It asks first, then changes one setting of your user account (`org.gnome.desktop.default-applications.terminal`, key `exec`). The old value is saved in `~/.config/sparkTerminal/previousDefaultTerminal.conf`, and "Restore OS default" puts it back.
+
+| Detail | Behaviour |
+|---|---|
+| What is changed | Only that one setting of your user, and sparkTerminal's own note of the old value. GNOME Terminal, `/etc`, `/usr`, `~/.bashrc` and other launchers are not touched, and no `sudo` is used. |
+| Takes effect | At once, and not as part of Apply or Cancel. |
+| Which programs follow it | Programs that read this GNOME setting. Whether the Ctrl+Alt+T shortcut does is checked by trying it. The system-wide `x-terminal-emulator` list is not changed, so programs that use that list still open the old terminal. |
+| Commands to run | A program that asks the terminal to run a command (`-e`) or to open in a folder gets an empty sparkTerminal, because these are not supported yet. |
+| Before you remove sparkTerminal | Press "Restore OS default" first. Otherwise the setting points to a program that no longer exists. |
 
 ## Install
 
@@ -67,6 +80,7 @@ NVIDIA DGX Spark (GB10, ARM64), DGX OS (Ubuntu 24.04), GNOME, VTE 0.76. The grap
 | Very long output | If one command prints more than 100,000 lines, the copied text may begin with blank lines where the oldest lines scrolled out of the history. |
 | Shell | Each tab runs `bash`. Other shells are not supported. |
 | Half-screen window | Tested only on X11 with one monitor. On Wayland a program usually cannot place its own window, so the setting may have no effect there. With several monitors the half is taken on the one under the mouse pointer (not tested). |
+| Default terminal | Only the per-user GNOME setting is changed. The system-wide `x-terminal-emulator` list is not, and `-e` and `--working-directory` are not supported yet. |
 | A rare crash | Once during testing the program ended with "Segmentation fault". It could not be reproduced in three runs. If it happens to you, start the program with `python3 -X faulthandler ./sparkTerminal.py` and report the output in an issue. |
 
 ## License
