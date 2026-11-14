@@ -10,6 +10,7 @@
 import configparser  # read and write the program's own settings file
 import getpass  # user name for the live preview
 import os  # folders, file permissions and the user's environment
+import shlex  # quote a requested command safely for bash
 import shutil  # delete the program's private temporary folder at the end
 import signal  # SIGHUP: the signal a terminal sends to its shell when the tab is closed
 import socket  # host name for the live preview
@@ -83,6 +84,7 @@ BUILT_IN_DEFAULTS = {  # defaults agreed with the user; used when no settings fi
     "copy_end_time": "no",  # no "Finished:" line after a copied result unless switched on
     "half_screen": "no",  # open the window at its normal size unless switched on
     "half_side": "left",  # which half of the screen is used when the half-screen switch is on
+    "run_commands": "no",  # do not run commands that other programs ask for, unless switched on
 }  # end of the table above
 
 
@@ -183,6 +185,7 @@ def load_defaults():  # program defaults from the settings file, checked against
             "copy_end_time": ["yes", "no"],  # on or off
             "half_screen": ["yes", "no"],  # on or off
             "half_side": ["left", "right"],  # left or right half of the screen
+            "run_commands": ["yes", "no"],  # on or off
         }  # end of the table above
         for key, options in allowed.items():  # check every key
             value = parser.get("defaults", key, fallback=values[key])  # value from the file, or the default
@@ -274,6 +277,41 @@ def restore_default_terminal():  # puts the saved previous value back; returns a
     return "Done. The previous default terminal is back."  # success
 
 
+def parse_launch_arguments(args):  # what another program asked for on the command line: a command to run and a folder to start in
+    command = None  # the command and its arguments, if one was asked for
+    folder = None  # the folder to start in, if one was asked for
+    index = 0  # position in the argument list
+    while index < len(args):  # look at the arguments one by one
+        arg = args[index]  # the argument looked at now
+        if arg in ("-e", "-x", "--"):  # everything after this word is the command and its arguments
+            rest = args[index + 1:]  # the command part
+            if len(rest) == 1 and any(ch.isspace() for ch in rest[0]) and not os.path.exists(rest[0]):  # one single text with spaces (gnome-terminal style): split it the way a shell would
+                try:  # a text with an open quote cannot be split
+                    rest = shlex.split(rest[0])  # split into command and arguments
+                except ValueError:  # broken quoting
+                    rest = [rest[0]]  # use it as it is
+            command = rest or None  # no words after the marker means no command
+            break  # the rest was the command, so there is nothing more to read
+        if arg.startswith("--working-directory="):  # folder written as --working-directory=FOLDER
+            folder = arg.split("=", 1)[1]  # the part after the equals sign
+        elif arg == "--working-directory" and index + 1 < len(args):  # folder written as --working-directory FOLDER
+            folder = args[index + 1]  # the next argument
+            index += 1  # it has been used
+        index += 1  # next argument (other options are ignored, as before)
+    return {"command": command, "folder": folder}  # what was asked (None for anything not asked)
+
+
+def launch_rc_lines(command):  # bash lines that run a requested command once, say what runs, and leave the shell open afterwards
+    joined = shlex.join(command)  # the command as one safely quoted line
+    return [  # one bash line per item
+        "printf '%s\\n' " + shlex.quote("sparkTerminal: running the command another program asked for: " + joined),  # tell the user what is running
+        "command " + joined,  # run it (the word "command" skips aliases and shell functions)
+        "__sparkStatus=$?",  # remember how it ended
+        "printf '%s\\n' \"sparkTerminal: the command ended with status $__sparkStatus; this tab stays open\"",  # tell the user it ended
+        "unset __sparkStatus",  # tidy up
+    ]  # end of the lines
+
+
 def half_screen_rectangle(side):  # (x, y, width, height) of the left or right half of the usable area of the monitor under the mouse pointer
     display = Gdk.Display.get_default()  # connection to the screen
     pointer = display.get_default_seat().get_pointer()  # the mouse of the user
@@ -303,7 +341,7 @@ def apply_look(terminal, settings):  # colours and font of one terminal widget (
 
 
 class SparkTerminalWindow(Gtk.Window):  # the main window of the program
-    def __init__(self):  # build the window when the program starts
+    def __init__(self, launch=None):  # build the window when the program starts (launch = what another program asked for, or None)
         super().__init__(title=APP_TITLE)  # create a normal window with the program name as title
         self.set_default_size(1000, 600)  # start at 1000 x 600 pixels (resizable)
         icon_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "sparkTerminalIcon.svg")  # icon file next to the program
@@ -337,7 +375,19 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         self.connect("destroy", Gtk.main_quit)  # closing the window ends the program
 
         self.tab_counter += 1  # count the first tab
-        self.add_tab("Shell", dict(self.defaults))  # open the first tab with the defaults, without asking
+        command, folder, notice = None, None, ""  # what the first tab runs, where it starts, and a message when a request is not followed
+        if launch and (launch["command"] or launch["folder"]):  # another program asked for a command or a folder
+            if self.defaults.get("run_commands") == "yes":  # the user allowed this in the gear dialog
+                command = launch["command"]  # the command to run
+                if launch["folder"] and os.path.isdir(launch["folder"]):  # the folder exists
+                    folder = launch["folder"]  # start there
+                elif launch["folder"]:  # the folder does not exist
+                    notice = "folder not found, started in the home folder"  # tell the user
+            else:  # not allowed: behave as always, but say so
+                notice = "another program asked for a command or folder; 'Run commands from other programs' is off (see the gear dialog)"  # tell the user
+        self.add_tab(os.path.basename(command[0]) or "Shell" if command else "Shell", dict(self.defaults), command, folder)  # open the first tab (named after the command when there is one)
+        if notice:  # something to tell the user
+            GLib.idle_add(self.show_copy_notice, notice, 8)  # show it in the title bar for 8 seconds once the window is up
 
     # ---------- settings box (used for new tabs, tab settings and program defaults) ----------
 
@@ -436,6 +486,18 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             grid.attach(side_box, 1, row, 1, 1)  # under the half-screen switch
             row += 1  # next row
 
+        run_state = {"on": settings["run_commands"] == "yes", "os": False}  # the real choice, and whether the box only shows what the OS terminal does
+        run_check = None  # "Run commands from other programs" exists only in the program defaults dialog (gear button)
+        if name is None:  # only the gear dialog has no tab name field
+            run_check = Gtk.CheckButton(label="Run commands from other programs")  # switch for the whole application
+            run_check.set_active(settings["run_commands"] == "yes")  # current state
+            run_note_base = ("When a program asks for a terminal to run a command (for example to start htop) or to open in a folder, "
+                             "sparkTerminal does it in a tab that stays open when the command ends.")  # plain explanation with an example
+            run_note = Gtk.Label(label=run_note_base, xalign=0)  # the label under the switch
+            run_note.set_line_wrap(True)  # long text wraps
+            run_note.set_max_width_chars(50)  # keeps the box narrow
+            run_note.set_margin_start(24)  # indented: belongs to the switch above
+            run_note.get_style_context().add_class("dim-label")  # smaller, greyed text
         if name is None:  # only the gear dialog has the default-terminal buttons
             default_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # holder: status text, buttons, note
             default_status = Gtk.Label(xalign=0)  # says what the default terminal is now
@@ -453,11 +515,34 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             default_box.pack_start(default_status, False, False, 0)  # status first
             default_box.pack_start(button_row, False, False, 0)  # then the buttons
             default_warning = Gtk.Label(xalign=0)  # warning line, not greyed out so that it stands out
-            default_warning.set_markup("<span foreground='#e01b24' weight='bold' size='large'>\u26a0</span> Some programs that ask for a terminal to run a command will open an empty window (not supported yet).")  # red bold warning symbol
+            default_warning.set_markup("<span foreground='#e01b24' weight='bold' size='large'>\u26a0</span> Some programs that ask for a terminal to run a command will open an empty window. Tick 'Run commands from other programs' below to fix this.")  # red bold warning symbol
             default_warning.set_line_wrap(True)  # long text wraps
             default_warning.set_max_width_chars(50)  # keeps the box narrow
             default_box.pack_start(default_note, False, False, 0)  # then the note
             default_box.pack_start(default_warning, False, False, 0)  # then the warning line
+            default_box.pack_start(run_check, False, False, 0)  # then the switch, below the warning it answers
+            default_box.pack_start(run_note, False, False, 0)  # and its explanation
+            default_warning.set_no_show_all(True)  # show_all() must not override the visibility chosen below
+
+            def update_warning(*_args):  # the warning is only needed while commands from other programs are not allowed
+                default_warning.set_visible(not run_check.get_active())  # hidden while the switch is ticked
+
+            def on_run_toggled(*_args):  # the box changed
+                if not run_state["os"]:  # a click by the user, not the indicator shown while the OS terminal is in use
+                    run_state["on"] = run_check.get_active()  # remember the real choice
+
+            def show_run_state(os_in_use):  # show the box for the current default terminal
+                run_state["os"] = os_in_use  # set first, so that the change below is not taken for a click
+                if os_in_use:  # the OS terminal runs commands from other programs
+                    run_check.set_active(True)  # indicator only: the real choice stays in run_state
+                else:  # sparkTerminal is the default
+                    run_check.set_active(run_state["on"])  # the real choice
+                run_check.set_sensitive(not os_in_use)  # can be changed only while sparkTerminal is the default
+                update_warning()  # the red warning follows the box
+
+            run_check.connect("toggled", on_run_toggled)  # remember clicks
+            run_check.connect("toggled", update_warning)  # follow the switch
+            update_warning()  # first display
             grid.attach(Gtk.Label(label="Default terminal", xalign=0, yalign=0), 0, row, 1, 1)  # label
             grid.attach(default_box, 1, row, 1, 1)  # the holder
             row += 1  # next row
@@ -466,6 +551,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 setting = terminal_setting()  # the GNOME setting, or None
                 can_make = False  # "Set sparkTerminal as default" enabled?
                 can_restore = False  # "Restore OS default" enabled?
+                ours = False  # is sparkTerminal the default terminal now?
                 if setting is None:  # not available on this desktop
                     text = "Not available on this desktop."  # status text
                 else:  # available
@@ -485,23 +571,47 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 default_status.set_text(text)  # update the label
                 make_button.set_sensitive(can_make)  # update the buttons
                 restore_button.set_sensitive(can_restore)  # update the buttons
+                show_run_state(not ours)  # ticked and greyed out while the OS terminal is in use, the real choice otherwise
 
             def on_make_default(_button):  # click on "Set sparkTerminal as default"
+                already = False  # the switch always starts off when sparkTerminal becomes the default: the user must choose it
                 ask = Gtk.MessageDialog(transient_for=dialog, modal=True, message_type=Gtk.MessageType.QUESTION,
                                         buttons=Gtk.ButtonsType.OK_CANCEL, text="Set sparkTerminal as your default terminal?")  # confirmation first, OK or Cancel
-                ask.format_secondary_markup("This changes one setting of your user account: which terminal programs open by default. "
-                                          "GNOME Terminal is not changed and still opens from its own icon. "
-                                          "You can undo this at any time with \"Restore OS default\".\n\n"
-                                          "<span foreground='#e01b24' weight='bold' size='large'>\u26a0</span> <b>Warning:</b> some programs ask the terminal to run a command for you. "
-                                          "For example, a program that wants to start htop in a terminal will open an empty "
-                                          "sparkTerminal window, and htop will not start.")  # plain explanation with a real example
+                text = ("This changes one setting of your user account: which terminal programs open by default. "
+                        "GNOME Terminal is not changed and still opens from its own icon. "
+                        "You can undo this at any time with \"Restore OS default\".\n\n")  # plain explanation
+                if already:  # commands from other programs are allowed
+                    text += "Programs that ask the terminal to run a command will work: sparkTerminal opens a tab for the command and keeps it open."  # good news
+                else:  # not allowed yet: warn and offer the fix
+                    text += ("<span foreground='#e01b24' weight='bold' size='large'>\u26a0</span> <b>Warning:</b> some programs ask the terminal to run a command for you. "
+                             "For example, a program that wants to start htop in a terminal will open an empty "
+                             "sparkTerminal window, and htop will not start. Tick the box below to let sparkTerminal run such commands.")  # warning with a real example
+                ask.format_secondary_markup(text)  # show the text
+                run_in_question = None  # the extra tick box exists only while the switch is off
+                if not already:  # offer the choice here too
+                    run_in_question = Gtk.CheckButton(label="Also run commands from other programs (the warning goes away)")  # unticked: the user must choose it
+                    ask.get_message_area().pack_start(run_in_question, False, False, 0)  # under the text
+                    run_in_question.show()  # make it visible
                 answer = ask.run()  # wait for OK or Cancel
+                with_commands = run_in_question is not None and run_in_question.get_active()  # did the user also tick the box?
                 ask.destroy()  # close the question
                 if answer == Gtk.ResponseType.OK:  # the user agreed
-                    refresh_default_status(make_default_terminal())  # do it and show the result
+                    message = make_default_terminal()  # do it
+                    if message.startswith("Done"):  # the default was set
+                        run_state["on"] = with_commands  # off unless the user ticked it in the question
+                        self.defaults["run_commands"] = "yes" if with_commands else "no"  # in the running program
+                        save_defaults(self.defaults)  # and save it at once (other pending changes in this box still need Apply)
+                        message += "\nRun commands from other programs is " + ("on (saved)." if with_commands else "off (saved). Tick it below to allow it.")  # tell the user
+                    refresh_default_status(message)  # show the result
 
             def on_restore_default(_button):  # click on "Restore OS default"
-                refresh_default_status(restore_default_terminal())  # undo and show the result
+                message = restore_default_terminal()  # undo the default terminal
+                if message.startswith("Done"):  # the OS default is back
+                    run_state["on"] = False  # sparkTerminal's own switch goes back to off; the box now only shows what the OS terminal does
+                    self.defaults["run_commands"] = "no"  # switch it off in the running program
+                    save_defaults(self.defaults)  # and save it at once (other pending changes in this box still need Apply)
+                    message += "\nsparkTerminal's own switch for running commands is reset to off (saved)."  # tell the user
+                refresh_default_status(message)  # show the result
 
             make_button.connect("clicked", on_make_default)  # connect the buttons
             restore_button.connect("clicked", on_restore_default)  # connect the buttons
@@ -533,6 +643,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 "copy_result": ("yes" if copy_check.get_active() else "no") if copy_check is not None else settings["copy_result"],  # copy switch state (a tab dialog keeps the value unchanged)
                 "copy_start_time": chosen_time("start", start_check),  # start-time option (a tab dialog keeps the value unchanged)
                 "copy_end_time": chosen_time("end", end_check),  # end-time option (a tab dialog keeps the value unchanged)
+                "run_commands": ("yes" if run_state["on"] else "no") if run_check is not None else settings["run_commands"],  # run-commands switch (a tab dialog keeps the value unchanged)
             }  # end of the table above
 
         def refresh(*_args):  # redraw the preview after any change
@@ -556,6 +667,9 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 saved_times["start"] = values["copy_start_time"] == "yes"  # start-time choice from the reset values
                 saved_times["end"] = values["copy_end_time"] == "yes"  # end-time choice from the reset values
                 sync_time_options()  # show them (unticked and greyed out while copying is off)
+            if run_check is not None:  # only the defaults dialog has the run-commands switch
+                run_state["on"] = values["run_commands"] == "yes"  # the real choice from the reset values
+                show_run_state(run_state["os"])  # show it (ticked and greyed out while the OS terminal is in use)
 
         for widget in (prompt_box, theme_box, colour_box, prompt_colour_box, size_box):  # every drop-down list
             widget.connect("changed", refresh)  # refresh the preview on change
@@ -584,7 +698,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         with open(record["prompt_file"], "w", encoding="utf-8") as handle:  # overwrite the file
             handle.write("PS1='" + build_ps1(record["settings"]) + "'\n")  # one line setting the prompt (contains no single quotes)
 
-    def add_tab(self, name, settings):  # create one tab with its own bash shell and its own settings
+    def add_tab(self, name, settings, command=None, folder=None):  # create one tab with its own bash shell and its own settings (optionally running a requested command in a folder)
         tab_id = self.tab_counter  # number used in the file names of this tab
         prompt_file = os.path.join(RUNTIME_DIR, f"tab{tab_id}.prompt")  # file with this tab's prompt
         rc_file = os.path.join(RUNTIME_DIR, f"tab{tab_id}.rc")  # startup file for this tab's shell
@@ -602,6 +716,10 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             handle.write(r"""__sparkMark() { local p=${PS1@P}; while [[ $p == *$'\e['*m* ]]; do p=${p%%$'\e['*}${p#*$'\e['*m}; done; __sparkN=$((__sparkN+1)); printf '\033]0;sparkTerminal:%s:%s\007' "$__sparkN" "${#p}"; }""" + "\n")  # prints the end mark "sparkTerminal:<counter>:<visible prompt width>" (colour codes are not counted)
             handle.write('PROMPT_COMMAND="__sparkPrompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}; __sparkMark"\n')  # run it before every prompt, keeping any existing PROMPT_COMMAND; the mark comes last, right before the prompt is drawn
 
+        if command:  # another program asked for a command and the user allowed it
+            with open(rc_file, "a", encoding="utf-8") as handle:  # add to this tab's own startup file (private folder)
+                handle.write("\n".join(launch_rc_lines(command)) + "\n")  # runs after everything else is set up, so the prompt returns afterwards
+
         terminal = Vte.Terminal()  # a new terminal widget for this tab
         terminal.set_scrollback_lines(SCROLLBACK_LINES)  # keep 100000 lines of history to scroll back and to copy results from
         scroller = Gtk.ScrolledWindow()  # adds a scroll bar next to the terminal
@@ -618,7 +736,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
 
         terminal.spawn_async(  # start bash inside this terminal, without blocking the window
             Vte.PtyFlags.DEFAULT,  # normal pseudo-terminal settings
-            os.environ.get("HOME", "/"),  # start in the home folder
+            folder or os.environ.get("HOME", "/"),  # start in the folder another program asked for, otherwise in the home folder
             [SHELL, "--rcfile", rc_file],  # bash with this tab's startup file (which loads ~/.bashrc first)
             None,  # keep the user's own environment variables
             GLib.SpawnFlags.DEFAULT,  # normal start flags
@@ -680,7 +798,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         except Exception:  # never let the copy feature break the terminal
             pass  # ignore the problem
 
-    def show_copy_notice(self, message):  # show a short notice in the window title, then restore the normal title
+    def show_copy_notice(self, message, seconds=3):  # show a short notice in the window title (3 seconds unless told otherwise), then restore the normal title
         self.set_title(APP_TITLE + " - " + message)  # notice in the title bar
         self.copy_notice_id = getattr(self, "copy_notice_id", 0) + 1  # a newer notice replaces an older one
         notice_id = self.copy_notice_id  # remember which notice this is
@@ -689,7 +807,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             if notice_id == self.copy_notice_id:  # only if no newer notice has appeared
                 self.set_title(APP_TITLE)  # back to the normal title
             return False  # do not repeat
-        GLib.timeout_add_seconds(3, restore)  # schedule it
+        GLib.timeout_add_seconds(seconds, restore)  # schedule it
 
     def on_shell_started(self, _terminal, pid, _error, record):  # bash has started (or failed to start)
         if pid and pid > 0:  # a real process number
@@ -918,7 +1036,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
 
 
 def main():  # program entry point
-    window = SparkTerminalWindow()  # build the window
+    window = SparkTerminalWindow(parse_launch_arguments(sys.argv[1:]))  # build the window (with what another program asked for, if anything)
     window.place_on_half()  # on the left or right half of the screen when that is switched on
     window.show_all()  # show it on screen
     try:  # make sure the private folder is removed however the program ends

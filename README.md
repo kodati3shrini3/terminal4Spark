@@ -17,7 +17,8 @@ It is part of the same family as [sparkToolset](https://github.com/kodati3shrini
 | Defaults for new tabs | The gear button sets the starting settings of every new tab. They are saved in `~/.config/sparkTerminal/settings.conf`. Open tabs keep their own settings. |
 | Copy the result of each command | One switch for the whole program, in the gear dialog (see below). |
 | Half-screen window | One switch for the whole program, in the gear dialog: "Open the window on half of the screen", with "Left half" or "Right half". The window takes that half of the monitor where your mouse pointer is, when the program starts and at once when you press Apply. It is not offered in the settings of a single tab. |
-| Default terminal | In the gear dialog, "Set sparkTerminal as default" (it asks first) sets sparkTerminal as the terminal that programs and the Ctrl+Alt+T shortcut open, for your user only. "Restore OS default" puts the old value back (on a normal setup that is the system's own default terminal). See "Make it the default terminal" below. |
+| Run commands from other programs | One switch for the whole program, in the gear dialog under "Default terminal", off by default. While your OS terminal is the default it is shown ticked and greyed out, because the OS terminal runs commands from other programs; sparkTerminal's own saved value is off. Once sparkTerminal is the default, the switch starts off and you can tick it. When it is ticked, a program that asks the terminal to run a command or to open in a folder gets a tab that does it (see "Run commands from other programs" below). |
+| Default terminal | In the gear dialog, "Set sparkTerminal as default" (it asks first) sets sparkTerminal as the terminal that programs and the Ctrl+Alt+T shortcut open, for your user only. "Restore OS default" puts the old value back (on a normal setup that is the system's own default terminal) and resets sparkTerminal's own "Run commands from other programs" to off. See "Make it the default terminal" below. |
 | Several windows | Each click on the icon opens a new window. All windows share one icon in the dock, and you close them yourself. Right-click the icon and choose "New Window" for another one. If you installed an earlier version, run the installer again to get this. |
 
 ## Copy the result of each command
@@ -38,16 +39,29 @@ Example: run `ls -l`, switch to a text editor and paste. You get the file list w
 
 Good to know: the result of a command can contain secrets such as tokens or passwords. It stays on the clipboard after you close the program, and some desktops keep a clipboard history. Switch the feature off when you work with sensitive output.
 
+## Run commands from other programs
+
+Some programs start a terminal and tell it what to do, for example "run `htop` in a terminal" or "open a terminal in this folder". This is off by default. Tick "Run commands from other programs" in the gear dialog (under "Default terminal") to allow it. While your OS terminal is the default, the box is shown ticked and greyed out (the OS terminal runs commands from other programs); it can be changed once sparkTerminal is the default, and it always starts off then. The choice is saved with Apply like the other settings, or at once if you tick the box in the question that appears when you press "Set sparkTerminal as default".
+
+| Detail | Behaviour |
+|---|---|
+| What is accepted | `-e command arguments`, `-x command arguments`, `-- command arguments` and `--working-directory FOLDER` (also written `--working-directory=FOLDER`). A single text with spaces after `-e` is split the way a shell would. Other options are ignored. |
+| What you see | A tab named after the command, a first line saying which command runs, the command's own output and a last line saying how it ended. The tab then stays open with a normal prompt. |
+| Folder only | A tab that starts in that folder. If the folder does not exist, the tab starts in your home folder and the title bar says so. |
+| When the switch is off | The program opens as usual (an empty tab in your home folder), and the title bar says for a few seconds that another program asked for a command or a folder. |
+| Several windows | Each start of the program is its own window. The command runs in the first tab of that window. |
+| Good to know | Any program that can start sparkTerminal can ask it to run any command with your rights, as with any other terminal. Tick the switch only if you want that. |
+
 ## Make it the default terminal
 
-This is optional and never happens by itself. Open the gear dialog and press "Set sparkTerminal as default". It asks first, then changes one setting of your user account (`org.gnome.desktop.default-applications.terminal`, key `exec`). The old value is saved in `~/.config/sparkTerminal/previousDefaultTerminal.conf`, and "Restore OS default" puts it back.
+This is optional and never happens by itself. Open the gear dialog and press "Set sparkTerminal as default". It asks first, then changes one setting of your user account (`org.gnome.desktop.default-applications.terminal`, key `exec`). The old value is saved in `~/.config/sparkTerminal/previousDefaultTerminal.conf`, and "Restore OS default" puts it back. It also resets sparkTerminal's own "Run commands from other programs" to off; the box is then shown ticked and greyed out, like the OS terminal's behaviour.
 
 | Detail | Behaviour |
 |---|---|
 | What is changed | Only that one setting of your user, and sparkTerminal's own note of the old value. GNOME Terminal, `/etc`, `/usr`, `~/.bashrc` and other launchers are not touched, and no `sudo` is used. |
 | Takes effect | At once, and not as part of Apply or Cancel. |
 | Which programs follow it | Programs that read this GNOME setting. Whether the Ctrl+Alt+T shortcut does is checked by trying it. The system-wide `x-terminal-emulator` list is not changed, so programs that use that list still open the old terminal. |
-| Commands to run | A program that asks the terminal to run a command (`-e`) or to open in a folder gets an empty sparkTerminal, because these are not supported yet. |
+| Commands to run | If "Run commands from other programs" is ticked, a program that asks the terminal to run a command (`-e`) or to open in a folder gets a tab that does it. If it is not ticked, such a program gets an empty sparkTerminal and the title bar says why. |
 | Before you remove sparkTerminal | Press "Restore OS default" first. Otherwise the setting points to a program that no longer exists. |
 
 ## Install
@@ -80,7 +94,7 @@ NVIDIA DGX Spark (GB10, ARM64), DGX OS (Ubuntu 24.04), GNOME, VTE 0.76. The grap
 | Very long output | If one command prints more than 100,000 lines, the copied text may begin with blank lines where the oldest lines scrolled out of the history. |
 | Shell | Each tab runs `bash`. Other shells are not supported. |
 | Half-screen window | Tested only on X11 with one monitor. On Wayland a program usually cannot place its own window, so the setting may have no effect there. With several monitors the half is taken on the one under the mouse pointer (not tested). |
-| Default terminal | Only the per-user GNOME setting is changed. The system-wide `x-terminal-emulator` list is not, and `-e` and `--working-directory` are not supported yet. |
+| Default terminal | Only the per-user GNOME setting is changed. The system-wide `x-terminal-emulator` list is not. |
 | A rare crash | Once during testing the program ended with "Segmentation fault". It could not be reproduced in three runs. If it happens to you, start the program with `python3 -X faulthandler ./sparkTerminal.py` and report the output in an issue. |
 
 ## License
