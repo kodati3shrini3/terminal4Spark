@@ -21,7 +21,7 @@ It is part of the same family as [sparkToolset](https://github.com/kodati3shrini
 
 ## Copy the result of each command
 
-Ticking "Copy the result of each command to the clipboard (all tabs)" in the gear dialog and pressing Apply turns this on in all open tabs at once. It is off by default and is not offered in the settings of a single tab. The setting is saved.
+Ticking "Copy command results (all tabs)" in the gear dialog and pressing Apply turns this on in all open tabs at once. It is off by default and is not offered in the settings of a single tab. The setting is saved.
 
 Example: run `ls -l`, switch to a text editor and paste. You get the file list without selecting anything on the screen.
 
@@ -29,6 +29,7 @@ Example: run `ls -l`, switch to a text editor and paste. You get the file list w
 |---|---|
 | What is copied | Only the output of the command you just ran. The prompt line is not included. |
 | Each new command | Replaces the previous clipboard content. |
+| Start and end time | Two options under the switch, both off by default. While the switch is unticked they are shown unticked and greyed out, and your choice comes back when you tick it again. "Add start time (first line)" puts a line such as `Started: 2026-11-14 18:21:05` before the result. "Add end time (last line)" puts a line such as `Finished: 2026-11-14 18:21:09` after it. The times are your computer's local time, with seconds, and are part of the copied text only, not shown in the terminal. |
 | A command with no output | Leaves the clipboard alone. |
 | A short notice | "copied N line(s)" appears in the window title for 3 seconds. |
 | Size | The history keeps 100,000 lines per tab. One result is limited to 1,000,000 bytes. A longer result is cut at a line end and keeps its beginning. |
