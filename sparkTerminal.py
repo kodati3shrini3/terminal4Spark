@@ -79,6 +79,8 @@ BUILT_IN_DEFAULTS = {  # defaults agreed with the user; used when no settings fi
     "prompt_colour": "auto",  # automatic: bold colour chosen from the theme and the text colour
     "font_size": "medium",  # system monospace size
     "copy_result": "no",  # do not copy command results to the clipboard unless switched on
+    "copy_start_time": "no",  # no "Started:" line before a copied result unless switched on
+    "copy_end_time": "no",  # no "Finished:" line after a copied result unless switched on
     "half_screen": "no",  # open the window at its normal size unless switched on
     "half_side": "left",  # which half of the screen is used when the half-screen switch is on
 }  # end of the table above
@@ -151,6 +153,19 @@ def sample_prompt(settings):  # the same prompt as plain text, for the live prev
     return "\x1b[1;38;2;" + prompt_rgb(settings) + "m" + text + "$\x1b[0m ls"  # bold coloured prompt, colour reset, then the example command in the text colour
 
 
+TIME_STAMP_FORMAT = "%Y-%m-%d %H:%M:%S"  # local date and time with seconds, e.g. 2026-11-14 18:21:05
+
+
+def copy_text_with_times(text, started, finished, add_start, add_end):  # the copied result with an optional "Started:" first line and "Finished:" last line
+    parts = []  # the lines of the final text, joined at the end
+    if add_start and started is not None:  # start time wanted and known
+        parts.append("Started: " + time.strftime(TIME_STAMP_FORMAT, time.localtime(started)))  # first line
+    parts.append(text)  # the command's result itself
+    if add_end and finished is not None:  # end time wanted and known
+        parts.append("Finished: " + time.strftime(TIME_STAMP_FORMAT, time.localtime(finished)))  # last line
+    return "\n".join(parts)  # one line break between the parts
+
+
 def load_defaults():  # program defaults from the settings file, checked against the allowed values
     values = dict(BUILT_IN_DEFAULTS)  # start from the agreed defaults
     parser = configparser.ConfigParser()  # reader for the simple key = value file
@@ -164,6 +179,8 @@ def load_defaults():  # program defaults from the settings file, checked against
             "prompt_colour": [v for v, _ in PROMPT_COLOURS],  # automatic or one of six colours
             "font_size": FONT_SIZES,  # medium, large
             "copy_result": ["yes", "no"],  # on or off
+            "copy_start_time": ["yes", "no"],  # on or off
+            "copy_end_time": ["yes", "no"],  # on or off
             "half_screen": ["yes", "no"],  # on or off
             "half_side": ["left", "right"],  # left or right half of the screen
         }  # end of the table above
@@ -275,22 +292,55 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             row += 1  # next row
             return box  # caller reads the choice from it
 
-        prompt_box = combo("Prompt", PROMPT_STYLES, settings["prompt_style"])  # prompt style list
+        prompt_box = combo("Prompt", sorted(PROMPT_STYLES, key=lambda item: item[1].lower()), settings["prompt_style"])  # prompt style list, sorted A to Z by the text shown
         system_check = Gtk.CheckButton(label="Always prefix with the system name (user@system)")  # system-name switch
         system_check.set_active(settings["system_name"] == "yes")  # current state
         grid.attach(system_check, 1, row, 1, 1)  # under the prompt list
         row += 1  # next row
+        prompt_colour_box = combo("Prompt colour", PROMPT_COLOURS, settings["prompt_colour"])  # prompt colour list, directly under the prompt settings
         theme_box = combo("Theme", THEMES, settings["theme"])  # theme list
         colour_box = combo("Text colour", TEXT_COLOURS, settings["text_colour"])  # text colour list
-        prompt_colour_box = combo("Prompt colour", PROMPT_COLOURS, settings["prompt_colour"])  # prompt colour list
         sizes = [(s, f"{s.capitalize()} ({font_points(s):g} pt)") for s in FONT_SIZES]  # "Medium (12 pt)", "Large (15 pt)"
         size_box = combo("Font size", sizes, settings["font_size"])  # font size list
         copy_check = None  # the copy switch exists only in the program defaults dialog (gear button), not for single tabs
+        start_check = None  # "Add start time" option (defaults dialog only)
+        end_check = None  # "Add end time" option (defaults dialog only)
+        saved_times = {"start": settings["copy_start_time"] == "yes", "end": settings["copy_end_time"] == "yes"}  # the user's time-option choices, kept while the main copy switch is off
         if name is None:  # only the gear dialog has no tab name field
-            copy_check = Gtk.CheckButton(label="Copy the result of each command to the clipboard (all tabs)")  # copy switch for the whole application
+            copy_check = Gtk.CheckButton(label="Copy command results (all tabs)")  # copy switch for the whole application
             copy_check.set_active(settings["copy_result"] == "yes")  # current state
             grid.attach(copy_check, 1, row, 1, 1)  # under the font size list
             row += 1  # next row
+            start_check = Gtk.CheckButton(label="Add start time (first line)")  # puts "Started: <time>" before the copied result
+            start_check.set_active(settings["copy_start_time"] == "yes")  # current state
+            start_check.set_margin_start(24)  # indented: belongs to the copy switch above
+            grid.attach(start_check, 1, row, 1, 1)  # under the copy switch
+            row += 1  # next row
+            end_check = Gtk.CheckButton(label="Add end time (last line)")  # puts "Finished: <time>" after the copied result
+            end_check.set_active(settings["copy_end_time"] == "yes")  # current state
+            end_check.set_margin_start(24)  # indented like the start option
+            grid.attach(end_check, 1, row, 1, 1)  # under the start option
+            row += 1  # next row
+            syncing = [False]  # True while the program itself changes the two options (so that this is not taken for a user choice)
+
+            def remember_time_options(_button):  # the user ticked or unticked a time option: keep the choice
+                if not syncing[0] and copy_check.get_active():  # only real clicks while copying is on
+                    saved_times["start"] = start_check.get_active()  # start option as chosen
+                    saved_times["end"] = end_check.get_active()  # end option as chosen
+
+            def sync_time_options(*_args):  # copying on: show the user's choices; copying off: show both options unticked and greyed out
+                syncing[0] = True  # these changes come from the program, not from the user
+                on = copy_check.get_active()  # state of the main switch
+                start_check.set_active(saved_times["start"] if on else False)  # shown as chosen, or unticked
+                end_check.set_active(saved_times["end"] if on else False)  # same for the end option
+                start_check.set_sensitive(on)  # greyed out while copying is off
+                end_check.set_sensitive(on)  # same for the end option
+                syncing[0] = False  # back to normal
+
+            start_check.connect("toggled", remember_time_options)  # watch the start option
+            end_check.connect("toggled", remember_time_options)  # watch the end option
+            copy_check.connect("toggled", sync_time_options)  # follow the main switch
+            sync_time_options()  # first display
         half_check = None  # the half-screen choice exists only in the program defaults dialog (gear button), not for single tabs
         left_radio = None  # "Left half" choice (defaults dialog only)
         right_radio = None  # "Right half" choice (defaults dialog only)
@@ -318,6 +368,12 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         preview.set_can_focus(False)  # it cannot be typed into
         grid.attach(preview, 0, row, 2, 1)  # full width under the controls
 
+        def chosen_time(which, check):  # a time option as the user chose it (while copying is off the box is shown unticked, the choice is in saved_times)
+            if check is None:  # a tab dialog has no such option
+                return settings["copy_" + which + "_time"]  # keep the stored value unchanged
+            on = check.get_active() if copy_check.get_active() else saved_times[which]  # visible state, or the kept choice
+            return "yes" if on else "no"  # stored form
+
         def current():  # the settings currently chosen in the box
             return {  # one value per setting
                 "prompt_style": prompt_box.get_active_id(),  # chosen style
@@ -329,6 +385,8 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 "half_screen": ("yes" if half_check.get_active() else "no") if half_check is not None else settings["half_screen"],  # half-screen switch state (a tab dialog keeps the value unchanged)
                 "half_side": ("right" if right_radio.get_active() else "left") if right_radio is not None else settings["half_side"],  # chosen half (a tab dialog keeps the value unchanged)
                 "copy_result": ("yes" if copy_check.get_active() else "no") if copy_check is not None else settings["copy_result"],  # copy switch state (a tab dialog keeps the value unchanged)
+                "copy_start_time": chosen_time("start", start_check),  # start-time option (a tab dialog keeps the value unchanged)
+                "copy_end_time": chosen_time("end", end_check),  # end-time option (a tab dialog keeps the value unchanged)
             }  # end of the table above
 
         def refresh(*_args):  # redraw the preview after any change
@@ -349,6 +407,9 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 (right_radio if values["half_side"] == "right" else left_radio).set_active(True)  # chosen half
             if copy_check is not None:  # only the defaults dialog has the switch
                 copy_check.set_active(values["copy_result"] == "yes")  # copy switch
+                saved_times["start"] = values["copy_start_time"] == "yes"  # start-time choice from the reset values
+                saved_times["end"] = values["copy_end_time"] == "yes"  # end-time choice from the reset values
+                sync_time_options()  # show them (unticked and greyed out while copying is off)
 
         for widget in (prompt_box, theme_box, colour_box, prompt_colour_box, size_box):  # every drop-down list
             widget.connect("changed", refresh)  # refresh the preview on change
@@ -435,6 +496,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         if text == "\r" and record["ready"] and record["copy_start"] is None:  # one Enter press while the shell waits at its prompt (not a paste, not a key typed into a running program)
             _col, row = terminal.get_cursor_position()  # the cursor is on the command line (row is absolute)
             record["copy_start"] = row + 1  # the output of the command starts on the next row
+            record["copy_time"] = time.time()  # moment the command was started (for the optional "Started:" line)
 
     def on_title_mark(self, terminal, record):  # the shell printed its end-of-output mark (title "sparkTerminal:<counter>:<prompt width>")
         try:  # a problem here must never disturb the terminal
@@ -444,6 +506,8 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             record["ready"] = True  # the shell has shown its first prompt
             start = record["copy_start"]  # row where the finished command's output started (None at the first prompt)
             record["copy_start"] = None  # the shell is at its prompt again
+            started = record.get("copy_time")  # moment the finished command was started
+            finished = time.time()  # moment the command ended (the prompt is back)
             if start is None or self.defaults.get("copy_result") != "yes":  # nothing to copy, or the application-wide switch is off
                 return  # leave the clipboard alone
             col, row = terminal.get_cursor_position()  # the cursor is behind the new prompt
@@ -463,8 +527,9 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
                 text = kept  # copy only the kept part
             if row - start >= SCROLLBACK_LINES:  # more rows than the history holds
                 note += ", the beginning scrolled out of the history"  # tell the user
+            count = text.count("\n") + 1  # number of result lines (the optional time lines are not counted)
+            text = copy_text_with_times(text, started, finished, self.defaults.get("copy_start_time") == "yes", self.defaults.get("copy_end_time") == "yes")  # add the optional time lines
             Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)  # replace the clipboard with this command's result
-            count = text.count("\n") + 1  # number of lines copied
             self.show_copy_notice(f"copied {count} line{'' if count == 1 else 's'}{note}")  # short notice in the title bar
         except Exception:  # never let the copy feature break the terminal
             pass  # ignore the problem
