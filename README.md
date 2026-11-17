@@ -10,7 +10,7 @@ It is part of the same family as [sparkToolset](https://github.com/kodati3shrini
 
 | Feature | How |
 |---|---|
-| Named tabs | "+" or Ctrl+Shift+T asks for a name. Double-click the tab or press Ctrl+Shift+R to rename. The x button or Ctrl+Shift+W closes it (it asks first if a program is still running). |
+| Named tabs | "+" (at the left end of the tab row) or Ctrl+Shift+T asks for a name. Double-click the tab or press Ctrl+Shift+R to rename. The x button or Ctrl+Shift+W closes it (it asks first if a program is still running). Tabs are drawn as boxes with slightly rounded top corners: the active tab is lighter with a green line on top, the other tabs are darker. The colours follow your desktop theme. |
 | Settings per tab | Right-click a tab and choose "Tab settings...". You can change the prompt style (7 choices, with or without the user@system prefix), the theme (dark, light or auto), the text colour (green, white, amber or cyan), the prompt colour and the font size (medium or large). A live preview shows the result before you apply it. |
 | Readable prompt | The prompt colour is "Automatic" by default: bold and chosen to stand out on the theme and text colour you picked. You can also choose a fixed colour. |
 | Readable file lists | Each theme has its own 16-colour palette, so blue directory names in `ls --color` stay visible on a dark background. |
