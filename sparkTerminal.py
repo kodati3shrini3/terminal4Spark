@@ -58,7 +58,7 @@ TEXT_RGB = {  # text colour per theme; darker shades on the light theme so the t
 PROMPT_COLOURS = [("auto", "Automatic (recommended)"), ("cyan", "Cyan"), ("yellow", "Yellow"), ("green", "Green"), ("magenta", "Magenta"), ("blue", "Blue"), ("white", "White (black on the light theme)")]  # prompt colour choices
 PROMPT_RGB = {  # prompt colour per theme; contrast measured: 8.8:1 or better on black, 6.8:1 or better on the soft light background
     "dark": {"cyan": "#00e5ff", "yellow": "#ffe14d", "green": "#66ff66", "magenta": "#ff77ff", "blue": "#66aaff", "white": "#ffffff"},  # bright shades on black
-    "light": {"cyan": "#005f6b", "yellow": "#6b5000", "green": "#0f5f0f", "magenta": "#7a2a7a", "blue": "#1f4fa3", "white": "#000000"},  # calmer dark shades on the soft light background
+    "light": {"cyan": "#005f6b", "yellow": "#6b5000", "green": "#0f5f0f", "magenta": "#a0189a", "blue": "#1556c4", "white": "#000000"},  # livelier magenta and blue (6.1:1 or better) on the soft light background
 }  # end of the table above
 AUTO_PROMPT = {  # what Automatic picks per text colour: a different colour family than the text, so prompt and output are easy to tell apart
     "dark": {"white": "cyan", "green": "yellow", "amber": "cyan", "cyan": "yellow"},  # on the dark theme
