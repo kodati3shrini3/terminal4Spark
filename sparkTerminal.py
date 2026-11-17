@@ -312,6 +312,37 @@ def launch_rc_lines(command):  # bash lines that run a requested command once, s
     ]  # end of the lines
 
 
+TAB_CSS = """
+notebook > header.top > tabs > tab {
+    background-image: none;
+    background-color: shade(@theme_bg_color, 0.82);
+    border: 1px solid alpha(currentColor, 0.35);
+    border-radius: 6px 6px 0 0;
+    box-shadow: none;
+    margin: 4px 2px 0 2px;
+    padding: 3px 8px;
+    min-height: 0;
+}
+notebook > header.top > tabs > tab:hover {
+    background-color: shade(@theme_bg_color, 0.95);
+}
+notebook > header.top > tabs > tab:checked {
+    background-color: shade(@theme_bg_color, 1.12);
+    border-top: 3px solid #76b900;
+    box-shadow: none;
+}
+"""  # style of the tab row: every tab is a box, the active tab is lighter with a green line on top (colours follow the desktop theme)
+
+
+def apply_tab_style():  # gives the tabs their box look; used only inside this program
+    try:  # a theme or GTK problem must never stop the program
+        provider = Gtk.CssProvider()  # holds the style text
+        provider.load_from_data(TAB_CSS.encode("utf-8"))  # read the style
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)  # apply it to this program only
+    except Exception:  # style not applied: the tabs keep the theme look
+        pass  # nothing else to do
+
+
 def half_screen_rectangle(side):  # (x, y, width, height) of the left or right half of the usable area of the monitor under the mouse pointer
     display = Gdk.Display.get_default()  # connection to the screen
     pointer = display.get_default_seat().get_pointer()  # the mouse of the user
@@ -355,9 +386,11 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
 
         self.notebook = Gtk.Notebook()  # tab container
         self.notebook.set_scrollable(True)  # let many tabs scroll instead of squeezing
+        apply_tab_style()  # boxed tab look
         self.add(self.notebook)  # place the tab container inside the window
 
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)  # holder for the "+" and gear buttons
+        plus_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)  # holder for the "+" button (left end of the tab row)
+        gear_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)  # holder for the gear button (right end of the tab row)
         plus_button = Gtk.Button.new_from_icon_name("list-add-symbolic", Gtk.IconSize.MENU)  # the "+" button with the standard add icon
         plus_button.set_relief(Gtk.ReliefStyle.NONE)  # flat look, like a tab bar button
         plus_button.set_tooltip_text("New tab: choose its name and settings (Ctrl+Shift+T)")  # plain-language hint on hover
@@ -366,10 +399,12 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         gear_button.set_relief(Gtk.ReliefStyle.NONE)  # flat look
         gear_button.set_tooltip_text("Default settings for new tabs (open tabs keep their own settings)")  # hint on hover
         gear_button.connect("clicked", self.on_defaults_clicked)  # clicking it opens the defaults box
-        buttons.pack_start(plus_button, False, False, 0)  # "+" first
-        buttons.pack_start(gear_button, False, False, 0)  # then the gear
-        buttons.show_all()  # action widgets must be shown explicitly
-        self.notebook.set_action_widget(buttons, Gtk.PackType.END)  # put both buttons at the right end of the tab bar
+        plus_box.pack_start(plus_button, False, False, 0)  # the "+" goes into its own holder
+        gear_box.pack_start(gear_button, False, False, 0)  # the gear goes into its own holder
+        plus_box.show_all()  # action widgets must be shown explicitly
+        gear_box.show_all()  # action widgets must be shown explicitly
+        self.notebook.set_action_widget(plus_box, Gtk.PackType.START)  # the "+" sits at the left end of the tab row, inside the tab bar
+        self.notebook.set_action_widget(gear_box, Gtk.PackType.END)  # the gear stays at the right end
 
         self.connect("key-press-event", self.on_key_press)  # listen for the keyboard shortcuts
         self.connect("destroy", Gtk.main_quit)  # closing the window ends the program
