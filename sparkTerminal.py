@@ -49,22 +49,22 @@ PROMPT_TIME_FORMATS = {  # date/time part per style ("Tue" = short day)
 }  # end of the table above
 
 THEMES = [("dark", "Dark"), ("light", "Light"), ("auto", "Auto (follows the GNOME light/dark setting)")]  # theme choices
-BACKGROUNDS = {"dark": "#000000", "light": "#ffffff"}  # background colour per theme
+BACKGROUNDS = {"dark": "#000000", "light": "#f6f5f4"}  # background colour per theme (soft off-white on the light theme)
 TEXT_COLOURS = [("green", "Green"), ("white", "White (black on the light theme)"), ("amber", "Amber"), ("cyan", "Cyan")]  # text colour choices
 TEXT_RGB = {  # text colour per theme; darker shades on the light theme so the text stays readable on white
     "dark": {"green": "#33cc33", "white": "#e6e6e6", "amber": "#ffb000", "cyan": "#00c8c8"},  # bright shades on black
     "light": {"green": "#1a7f1a", "white": "#202020", "amber": "#9a5b00", "cyan": "#007a7a"},  # dark shades on white
 }  # end of the table above
 PROMPT_COLOURS = [("auto", "Automatic (recommended)"), ("cyan", "Cyan"), ("yellow", "Yellow"), ("green", "Green"), ("magenta", "Magenta"), ("blue", "Blue"), ("white", "White (black on the light theme)")]  # prompt colour choices
-PROMPT_RGB = {  # prompt colour per theme; contrast measured: 8.8:1 or better on black, 7.4:1 or better on white
+PROMPT_RGB = {  # prompt colour per theme; contrast measured: 8.8:1 or better on black, 6.8:1 or better on the soft light background
     "dark": {"cyan": "#00e5ff", "yellow": "#ffe14d", "green": "#66ff66", "magenta": "#ff77ff", "blue": "#66aaff", "white": "#ffffff"},  # bright shades on black
-    "light": {"cyan": "#005f6b", "yellow": "#6b5000", "green": "#0f5f0f", "magenta": "#8b008b", "blue": "#0033cc", "white": "#000000"},  # dark shades on white
+    "light": {"cyan": "#005f6b", "yellow": "#6b5000", "green": "#0f5f0f", "magenta": "#7a2a7a", "blue": "#1f4fa3", "white": "#000000"},  # calmer dark shades on the soft light background
 }  # end of the table above
 AUTO_PROMPT = {  # what Automatic picks per text colour: a different colour family than the text, so prompt and output are easy to tell apart
     "dark": {"white": "cyan", "green": "yellow", "amber": "cyan", "cyan": "yellow"},  # on the dark theme
     "light": {"white": "blue", "green": "magenta", "amber": "blue", "cyan": "magenta"},  # on the light theme
 }  # end of the table above
-PALETTES = {  # the 16 standard terminal colours per theme (black, red, green, yellow, blue, magenta, cyan, white, then the bright versions); contrast measured: 4.6:1 or better on black, 5.1:1 or better on white
+PALETTES = {  # the 16 standard terminal colours per theme (black, red, green, yellow, blue, magenta, cyan, white, then the bright versions); contrast measured: 4.6:1 or better on black, 4.7:1 or better on the soft light background
     "dark": ["#767676", "#ff6b6b", "#4ee04e", "#e6c200", "#6aa7ff", "#d87bff", "#34d6d6", "#d3d7cf", "#9a9a9a", "#ff8a8a", "#8ae234", "#fce94f", "#8fbcff", "#e6a0ff", "#6ae8e8", "#ffffff"],  # light shades on black (the default dark blue was only 2.2:1)
     "light": ["#000000", "#b3001b", "#1a7f1a", "#7a5800", "#0033cc", "#8b008b", "#006b7a", "#555555", "#444444", "#cc0000", "#237a00", "#8a5a00", "#0044ff", "#a000a0", "#007a85", "#1a1a1a"],  # dark shades on white
 }  # end of the table above
@@ -331,7 +331,27 @@ notebook > header.top > tabs > tab:checked {
     border-top: 3px solid #76b900;
     box-shadow: none;
 }
-"""  # style of the tab row: every tab is a box, the active tab is lighter with a green line on top (colours follow the desktop theme)
+notebook.spark-light > header {
+    background-color: #dcd9d5;
+    background-image: none;
+}
+notebook.spark-light > header.top > tabs > tab {
+    background-color: #cfccc7;
+    color: #202020;
+}
+notebook.spark-light > header.top > tabs > tab label {
+    color: #202020;
+}
+notebook.spark-light > header.top > tabs > tab:hover {
+    background-color: #e2dfdb;
+}
+notebook.spark-light > header.top > tabs > tab:checked {
+    background-color: #f6f5f4;
+}
+notebook.spark-light > header.top button {
+    color: #202020;
+}
+"""  # style of the tab row (the spark-light rules apply while the tab in front uses the light theme): every tab is a box, the active tab is lighter with a green line on top (colours follow the desktop theme)
 
 
 def apply_tab_style():  # gives the tabs their box look; used only inside this program
@@ -387,6 +407,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         self.notebook = Gtk.Notebook()  # tab container
         self.notebook.set_scrollable(True)  # let many tabs scroll instead of squeezing
         apply_tab_style()  # boxed tab look
+        self.notebook.connect_after("switch-page", self.on_page_switched)  # the tab row follows the theme of the tab that comes to the front
         self.add(self.notebook)  # place the tab container inside the window
 
         plus_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)  # holder for the "+" button (left end of the tab row)
@@ -789,6 +810,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         terminal.connect("button-press-event", self.on_terminal_clicked)  # right-click inside the terminal opens Copy/Paste/Select all
         self.show_all()  # make the new tab and its widgets visible
         self.notebook.set_current_page(self.notebook.page_num(scroller))  # switch to the new tab
+        self.set_tab_bar_theme(settings)  # the tab row follows this tab's theme (also for the very first tab)
         terminal.grab_focus()  # put the keyboard cursor in the terminal so you can type at once
 
     def on_commit(self, terminal, text, _size, record):  # a key press is about to go to bash
@@ -867,6 +889,20 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
         box.show_all()  # make both visible
         return box  # used as the tab's title widget
 
+    def set_tab_bar_theme(self, settings):  # light tab row for a light tab, normal (desktop) look otherwise
+        try:  # a style problem must never stop the program
+            context = self.notebook.get_style_context()  # style information of the tab container
+            if settings is not None and effective_theme(settings) == "light":  # the tab in front uses the light theme
+                context.add_class("spark-light")  # switch on the light tab row style
+            else:  # dark theme (or no tab)
+                context.remove_class("spark-light")  # back to the normal tab row style
+        except Exception:  # not possible: keep the current look
+            pass  # nothing else to do
+
+    def on_page_switched(self, _notebook, page, _number):  # another tab came to the front
+        record = self.tabs.get(page)  # that tab's information (None while a tab is being built)
+        self.set_tab_bar_theme(record["settings"] if record else None)  # light or normal tab row
+
     def tab_label(self, scroller):  # the Gtk.Label of a tab
         return self.tabs[scroller]["label"]  # label remembered when the tab was made
 
@@ -926,6 +962,7 @@ class SparkTerminalWindow(Gtk.Window):  # the main window of the program
             self.tab_label(scroller).set_text(name)  # new tab name
         record["settings"] = settings  # remember the new settings for this tab
         apply_look(record["terminal"], settings)  # colours and font change at once
+        self.set_tab_bar_theme(settings)  # the tab row follows the new theme
         self.write_prompt_file(record)  # the prompt changes at the next prompt (press Enter)
 
     def on_new_tab_clicked(self, _button=None):  # "+" button or Ctrl+Shift+T
